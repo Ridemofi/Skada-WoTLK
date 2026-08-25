@@ -98,6 +98,7 @@ Private.tCopy(windefaultscopy, Skada.windowdefaults)
 Skada.defaults = {
 	profile = {
 		firsthit = true,
+		fastupdates = false,
 		hidedisables = true,
 		informativetooltips = true,
 		memorycheck = true,
@@ -711,6 +712,12 @@ options.args.generaloptions = {
 					type = "toggle",
 					name = L["Disable Comms"],
 					order = 420
+				},
+				fastupdates = {
+					type = "toggle",
+					name = L["Fast updates"],
+					desc = L["opt_fastupdates_desc"],
+					order = 430
 				}
 			}
 		}

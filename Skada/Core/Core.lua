@@ -227,6 +227,7 @@ do
 		-- add stuff.
 		set.name = setname
 		set.starttime = time()
+		set._startTime = GetTime()
 		set.time = 0
 		set.actors = wipe(set.actors or {})
 

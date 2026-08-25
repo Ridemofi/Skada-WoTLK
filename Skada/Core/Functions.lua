@@ -1019,12 +1019,21 @@ end
 
 -- returns the selected set time.
 function Skada:GetSetTime(set)
-	local settime = set and set.time
-	return not settime and 0 or (settime >= 1) and settime or max(1, time() - set.starttime)
+	if not set then return 0 end
+	local settime = set.time
+	if settime and settime >= 1 then
+		return settime
+	end
+	if self.profile.fastupdates and set._startTime then
+		return max(0.1, GetTime() - set._startTime)
+	end
+	return set.starttime and max(1, time() - set.starttime) or 0
 end
 
 -- returns the actor's active/effective time
 function Skada:GetActiveTime(set, actor, active)
+	if not actor then return 1 end
+
 	-- force active for pvp/arena
 	active = active or (set and (set.type == "pvp" or set.type == "arena"))
 
@@ -1033,7 +1042,15 @@ function Skada:GetActiveTime(set, actor, active)
 
 	-- active: actor's time.
 	if (self.profile.timemesure ~= 2 or active) and actor.time and actor.time > 0 then
-		return max(1, min(actor.time, settime))
+		if self.profile.fastupdates and actor.last then
+			local curtime = Skada._Time or GetTime()
+			local delta = curtime - actor.last
+			if delta > 0 and delta < 3.5 then
+				local live_time = actor.time + delta
+				return max(0.1, min(live_time, settime))
+			end
+		end
+		return max(0.1, min(actor.time, settime))
 	end
 
 	-- effective: combat time.
