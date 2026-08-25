@@ -710,30 +710,48 @@ do
 		self:UpdateDisplay(true)
 	end
 
-	function Skada:TestMode()
-		if InCombatLockdown() or IsGroupInCombat() then
-			fake_set = del(fake_set, true)
-			self.testMode = nil
-			if update_timer then
-				self:CancelTimer(update_timer)
-				update_timer = nil
-			end
-			return
+	local function stop_test_mode(self)
+		if not self.testMode then return end
+		self.testMode = nil
+		fake_set = del(fake_set, true)
+		if update_timer then
+			self:CancelTimer(update_timer)
+			update_timer = nil
 		end
-		self.testMode = not self.testMode
-		if not self.testMode then
-			fake_set = del(fake_set, true)
-			if update_timer then
-				self:CancelTimer(update_timer)
-				update_timer = nil
-			end
-			self.current = del(self.current, true)
+		if self.test_timer then
+			self:CancelTimer(self.test_timer)
+			self.test_timer = nil
+		end
+		self.current = del(self.current, true)
+		self:Wipe()
+		self:UpdateDisplay(true)
+	end
+	Skada.EndTestMode = stop_test_mode
+
+	function Skada:TestMode(start)
+		if InCombatLockdown() or IsGroupInCombat() then
+			stop_test_mode(self)
 			return
 		end
 
+		if self.testMode or start == false then
+			stop_test_mode(self)
+			return
+		end
+
+		self.testMode = true
 		self:Wipe()
 		self.current = generate_fake_data()
-		update_timer = update_timer or self:ScheduleRepeatingTimer(update_fake_data, self.profile.updatefrequency or 0.25, self)
+		if update_timer then
+			self:CancelTimer(update_timer)
+			update_timer = nil
+		end
+		update_timer = self:ScheduleRepeatingTimer(update_fake_data, self.profile.updatefrequency or 0.25, self)
+		if self.test_timer then
+			self:CancelTimer(self.test_timer)
+			self.test_timer = nil
+		end
+		self.test_timer = self:ScheduleTimer(stop_test_mode, 60, self)
 	end
 end
 

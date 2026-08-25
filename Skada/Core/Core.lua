@@ -2670,7 +2670,7 @@ function Skada:PLAYER_REGEN_ENABLED()
 end
 
 function Skada:PLAYER_REGEN_DISABLED()
-	if not self.disabled and not self.current then
+	if not self.disabled and (not self.current or self.testMode) then
 		self:Debug("\124cffffbb00StartCombat\124r: PLAYER_REGEN_DISABLED")
 		combat_start()
 	end
@@ -3048,6 +3048,10 @@ do
 	end
 
 	function combat_start()
+		if Skada.testMode and Skada.EndTestMode then
+			Skada:EndTestMode()
+		end
+
 		Skada._time = time()
 
 		death_counter = 0
@@ -3296,6 +3300,10 @@ do
 	function Skada:OnCombatEvent(t)
 		-- ignored combat event?
 		if (not t.event or ignored_events[t.event]) and not (spellcast_events[t.event] and self.current) then return end
+
+		if self.testMode and self.EndTestMode then
+			self:EndTestMode()
+		end
 
 		src_is_interesting = false
 		dst_is_interesting = false
