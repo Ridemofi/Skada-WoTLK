@@ -67,6 +67,10 @@ Skada.windowdefaults = {
 	strata = "LOW",
 	scale = 1,
 	modeincombat = "",
+	modeincombat_tank = "",
+	modeincombat_healer = "",
+	modeincombat_damager = "",
+	role_onlygroup = false,
 	wipemode = "",
 	enabletitle = true,
 	titleset = true,
@@ -1525,6 +1529,27 @@ do
 									order = 10,
 									values = modeValues
 								},
+								modeincombat_tank = {
+									type = "select",
+									name = "|TInterface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES:16:16:0:0:64:64:0:19:22:41|t " .. L["Combat Mode (Tank)"],
+									desc = L["opt_combatmode_tank_desc"],
+									order = 12,
+									values = modeValues
+								},
+								modeincombat_healer = {
+									type = "select",
+									name = "|TInterface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES:16:16:0:0:64:64:20:39:1:20|t " .. L["Combat Mode (Healer)"],
+									desc = L["opt_combatmode_healer_desc"],
+									order = 14,
+									values = modeValues
+								},
+								modeincombat_damager = {
+									type = "select",
+									name = "|TInterface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES:16:16:0:0:64:64:20:39:22:41|t " .. L["Combat Mode (DPS)"],
+									desc = L["opt_combatmode_damager_desc"],
+									order = 16,
+									values = modeValues
+								},
 								wipemode = {
 									type = "select",
 									name = L["Wipe Mode"],
@@ -1537,7 +1562,15 @@ do
 									name = L["Return after combat"],
 									desc = L["Return to the previous set and mode after combat ends."],
 									order = 30,
-									disabled = function() return (db.modeincombat == "" and db.wipemode == "") end
+									disabled = function()
+										return (db.modeincombat == "" and (db.modeincombat_tank or "") == "" and (db.modeincombat_healer or "") == "" and (db.modeincombat_damager or "") == "" and db.wipemode == "")
+									end
+								},
+								role_onlygroup = {
+									type = "toggle",
+									name = L["Role modes only in group"],
+									desc = L["opt_rolemodes_onlygroup_desc"],
+									order = 35
 								},
 								autocurrent = {
 									type = "toggle",

@@ -3095,12 +3095,21 @@ do
 		Skada.inCombat = true
 		Skada:Wipe()
 
+		local userRole = (userGUID and Skada.GetUnitRole(userGUID)) or (UnitGroupRolesAssigned and UnitGroupRolesAssigned("player"))
+		local inGroup = IsInGroup() or IsInRaid() or (GetNumGroupMembers() > 0)
 		for i = 1, #windows do
 			local win = windows[i]
 			local db = win and win.db
 			if db then
-				-- combat mode switch
-				local mymode = find_mode(db.modeincombat)
+				-- combat mode switch: prioritize role-specific mode (unless role_onlygroup is enabled and player is solo), then fallback to general modeincombat
+				local roleAllowed = not db.role_onlygroup or inGroup
+				local roleModeName = roleAllowed and (
+								  (userRole == "TANK" and db.modeincombat_tank)
+							   or (userRole == "HEALER" and db.modeincombat_healer)
+							   or (userRole == "DAMAGER" and db.modeincombat_damager)
+				) or nil
+
+				local mymode = (roleModeName and roleModeName ~= "" and find_mode(roleModeName)) or find_mode(db.modeincombat)
 				if mymode then
 					if db.returnaftercombat then
 						if win.selectedset then

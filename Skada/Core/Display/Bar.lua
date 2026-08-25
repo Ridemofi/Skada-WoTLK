@@ -2005,7 +2005,7 @@ Skada:RegisterDisplay("Bar Display", "mod_bar_desc", function(L, P, G, _, _, O)
 
 			local applytheme, applywindow = nil, nil
 			local savetheme, savewindow = nil, nil
-			local skipped = {"name", "x", "y", "sticked", "set", "modeincombat", "wipemode", "returnaftercombat"}
+			local skipped = {"name", "x", "y", "sticked", "set", "modeincombat", "modeincombat_tank", "modeincombat_healer", "modeincombat_damager", "role_onlygroup", "wipemode", "returnaftercombat"}
 			local list = {}
 
 			local themes = {
