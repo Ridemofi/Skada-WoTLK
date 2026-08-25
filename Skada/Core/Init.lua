@@ -18,7 +18,7 @@ ns.callbacks = LibStub("CallbackHandler-1.0"):New(ns)
 -- straight from the raw saved variable because AceDB hasn't wrapped it (nor
 -- applied its defaults) yet at this point of the load, so nil means "default on".
 if ns.ukLocale then
-	if not (SkadaDB and SkadaDB.global and SkadaDB.global.uklang == false) then
+	if (SkadaDB and SkadaDB.global and SkadaDB.global.uklang == true) then
 		for key, value in pairs(ns.ukLocale) do
 			ns.Locale[key] = value
 		end
@@ -42,7 +42,7 @@ ns.mediapath = format([[Interface\AddOns\%s\Media]], folder)
 -- options table
 ns.options = {
 	type = "group",
-	name = "Skada (\124cffb57edcmod by Kappa\124r)",
+	name = "Skada",
 	get = true,
 	set = true,
 	args = {}

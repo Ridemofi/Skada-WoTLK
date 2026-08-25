@@ -5,6 +5,7 @@ Skada:RegisterModule("Threat", function(L, P, _, _, M, O)
 
 	local format, max, select = string.format, math.max, select
 	local UnitExists, UnitName = UnitExists, UnitName
+	local UnitIsConnected = UnitIsConnected
 	local UnitDetailedThreatSituation, InCombatLockdown = UnitDetailedThreatSituation, InCombatLockdown
 	local GroupIterator, GetUnitRole, GetUnitSpec = Skada.GroupIterator, Skada.GetUnitRole, Skada.GetUnitSpec
 	local PlaySoundFile = PlaySoundFile
@@ -83,7 +84,7 @@ Skada:RegisterModule("Threat", function(L, P, _, _, M, O)
 				threat_table[actorname] = actor
 			end
 
-			if not actor or not actor.unit then return end
+			if not actor or not actor.unit or not UnitExists(actor.unit) or (not owner and not UnitIsConnected(actor.unit)) then return end
 
 			local isTanking, _, threatpct, _, threatvalue = UnitDetailedThreatSituation(actor.unit, target)
 			if threatvalue then

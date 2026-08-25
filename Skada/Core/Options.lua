@@ -373,7 +373,7 @@ options.args.generaloptions = {
 							width = "full",
 							order = 1,
 							get = function()
-								return Skada.global.uklang ~= false
+								return Skada.global.uklang == true
 							end,
 							set = function(_, value)
 								Skada.global.uklang = value
