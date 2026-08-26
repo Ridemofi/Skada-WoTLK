@@ -2658,6 +2658,16 @@ end
 -- never initially registered.
 function Skada:PLAYER_REGEN_ENABLED()
 	self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+	if Skada.debuglog_on then
+		self:LogDebug("mode", "PLAYER_REGEN_ENABLED: current=%s stopped=%s lockdown=%s group=%s pets=%s",
+			tostring(self.current ~= nil), tostring(self.current and self.current.stopped),
+			tostring(InCombatLockdown()), tostring(IsGroupInCombat()), tostring(pets_in_combat()))
+	end
+	if self.profile and self.profile.debug then
+		self:Debug(format("[Mode] PLAYER_REGEN_ENABLED: current=%s stopped=%s lockdown=%s group=%s pets=%s",
+			tostring(self.current ~= nil), tostring(self.current and self.current.stopped),
+			tostring(InCombatLockdown()), tostring(IsGroupInCombat()), tostring(pets_in_combat())))
+	end
 	if not self.current then return end
 
 	-- we make sure to end the segment only if:
@@ -2670,6 +2680,14 @@ function Skada:PLAYER_REGEN_ENABLED()
 end
 
 function Skada:PLAYER_REGEN_DISABLED()
+	if Skada.debuglog_on then
+		self:LogDebug("mode", "PLAYER_REGEN_DISABLED: disabled=%s current=%s inCombat=%s testMode=%s",
+			tostring(self.disabled), tostring(self.current ~= nil), tostring(self.inCombat), tostring(self.testMode))
+	end
+	if self.profile and self.profile.debug then
+		self:Debug(format("[Mode] PLAYER_REGEN_DISABLED: disabled=%s current=%s inCombat=%s testMode=%s",
+			tostring(self.disabled), tostring(self.current ~= nil), tostring(self.inCombat), tostring(self.testMode)))
+	end
 	if not self.disabled and (not self.current or self.testMode) then
 		self:Debug("\124cffffbb00StartCombat\124r: PLAYER_REGEN_DISABLED")
 		combat_start()
@@ -2927,6 +2945,27 @@ function Skada:SetModes()
 			win:Wipe()
 			Skada.changed = true
 
+			if Skada.debuglog_on then
+				Skada:LogDebug("mode", "SetModes: win '%s' [selected=%s | restore_mode=%s | restore_set=%s | wipemode=%s | isGroupDead=%s | return=%s]",
+					tostring(win.name),
+					tostring(win.selectedmode and win.selectedmode.moduleName),
+					tostring(win.restore_mode),
+					tostring(win.restore_set),
+					tostring(win.db.wipemode),
+					tostring(IsGroupDead()),
+					tostring(win.db.returnaftercombat))
+			end
+			if Skada.profile and Skada.profile.debug then
+				Skada:Debug(format("[Mode] SetModes: win '%s' [selected=%s | restore_mode=%s | restore_set=%s | wipemode=%s | isGroupDead=%s | return=%s]",
+					tostring(win.name),
+					tostring(win.selectedmode and win.selectedmode.moduleName),
+					tostring(win.restore_mode),
+					tostring(win.restore_set),
+					tostring(win.db.wipemode),
+					tostring(IsGroupDead()),
+					tostring(win.db.returnaftercombat)))
+			end
+
 			if win.db.wipemode ~= "" and IsGroupDead() then
 				restore_window_view(win, "current", win.db.wipemode)
 			elseif win.db.returnaftercombat and win.restore_mode and win.restore_set then
@@ -3111,13 +3150,34 @@ do
 
 				local mymode = (roleModeName and roleModeName ~= "" and find_mode(roleModeName)) or find_mode(db.modeincombat)
 				if mymode then
+					local modeToRestore = nil
 					if db.returnaftercombat then
 						if win.selectedset then
 							win.restore_set = win.selectedset
 						end
-						if win.selectedmode then
-							win.restore_mode = win.selectedmode.moduleName
+						modeToRestore = (win.parentmode and win.parentmode.moduleName) or (win.selectedmode and win.selectedmode.moduleName)
+						if modeToRestore then
+							win.restore_mode = modeToRestore
 						end
+					end
+
+					if Skada.debuglog_on then
+						Skada:LogDebug("mode", "combat_start: win '%s' [prev=%s | parent=%s | restore_mode=%s | new=%s | return=%s]",
+							tostring(win.name),
+							tostring(win.selectedmode and win.selectedmode.moduleName),
+							tostring(win.parentmode and win.parentmode.moduleName),
+							tostring(modeToRestore),
+							tostring(mymode and mymode.moduleName),
+							tostring(db.returnaftercombat))
+					end
+					if Skada.profile and Skada.profile.debug then
+						Skada:Debug(format("[Mode] combat_start: win '%s' [prev=%s | parent=%s | restore_mode=%s | new=%s | return=%s]",
+							tostring(win.name),
+							tostring(win.selectedmode and win.selectedmode.moduleName),
+							tostring(win.parentmode and win.parentmode.moduleName),
+							tostring(modeToRestore),
+							tostring(mymode and mymode.moduleName),
+							tostring(db.returnaftercombat)))
 					end
 
 					win.selectedset = "current"
@@ -3293,6 +3353,12 @@ do
 
 	local function tentative_handler()
 		Skada:LogDebug("segment", "tentative segment dropped, the next combat event reuses it")
+		if Skada.debuglog_on then
+			Skada:LogDebug("mode", "tentative_handler: segment dropped (current was cleared to nil)")
+		end
+		if Skada.profile and Skada.profile.debug then
+			Skada:Debug("[Mode] tentative_handler: segment dropped (current was cleared to nil)")
+		end
 		tentative_set = Skada.current
 		Skada.current = nil
 		tentative = nil
