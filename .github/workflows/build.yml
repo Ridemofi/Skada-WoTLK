@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths:
       - "Skada/**"
-      - "SkadaLocale/**"
       - "SkadaImprovement/**"
       - "SkadaStorage/**"
       - ".github/workflows/build.yml"
@@ -15,7 +14,6 @@ on:
     branches: [main]
     paths:
       - "Skada/**"
-      - "SkadaLocale/**"
       - "SkadaImprovement/**"
       - "SkadaStorage/**"
       - ".github/workflows/build.yml"
@@ -103,7 +101,7 @@ jobs:
           fi
 
           # Every addon folder must agree on the version, or the release is inconsistent.
-          for toc in SkadaLocale/SkadaLocale.toc SkadaImprovement/SkadaImprovement.toc SkadaStorage/SkadaStorage.toc; do
+          for toc in SkadaImprovement/SkadaImprovement.toc SkadaStorage/SkadaStorage.toc; do
             other="$(sed -n 's/^## Version:[[:space:]]*//p' "$toc" | head -1)"
             if [ "$other" != "$toc_version" ]; then
               echo "::error::version mismatch: Skada.toc is $toc_version but $toc is $other"
@@ -126,7 +124,7 @@ jobs:
       - name: Stage addon folders
         run: |
           mkdir -p dist
-          for folder in Skada SkadaLocale SkadaImprovement SkadaStorage; do
+          for folder in Skada SkadaImprovement SkadaStorage; do
             cp -r "$folder" dist/
           done
 
@@ -162,7 +160,7 @@ jobs:
           else
             artifact="$name"
           fi
-          (cd dist && zip -qr "../$name.zip" Skada SkadaLocale SkadaImprovement SkadaStorage)
+          (cd dist && zip -qr "../$name.zip" Skada SkadaImprovement SkadaStorage)
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
           ls -lh "$name.zip"

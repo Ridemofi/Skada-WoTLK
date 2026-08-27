@@ -11,26 +11,6 @@ ns.Private = {} -- holds private stuff
 ns.Locale = LibStub("AceLocale-3.0"):GetLocale(folder)
 ns.callbacks = LibStub("CallbackHandler-1.0"):New(ns)
 
--- Ukrainian language (account-wide, ON by default). The 3.3.5a client has no
--- ukUA locale, so rather than relying on AceLocale's game-locale gating we
--- overlay our own translations (Locales\ukUA.lua) onto the active locale table.
---
--- The flag lives in the SkadaLocale addon, not in SkadaDB: the client restores
--- an addon's own SavedVariables only after all of its files have run, so
--- SkadaDB is still nil right here. Tables.lua and Options.lua read L[...] while
--- they load, which fixes every string before SkadaDB ever appears -- that is
--- why the toggle used to do nothing. SkadaLocale is a separate addon listed in
--- ## Dependencies, so it is fully loaded (and its saved variable restored)
--- before this line runs. nil means "default on".
-if ns.ukLocale then
-	if (SkadaDB and SkadaDB.global and SkadaDB.global.uklang == true) then
-		for key, value in pairs(ns.ukLocale) do
-			ns.Locale[key] = value
-		end
-	end
-	ns.ukLocale = nil -- release the table, it's no longer needed
-end
-
 -- cache frequently used globals
 local pairs, ipairs = pairs, ipairs
 local select, next, max = select, next, math.max

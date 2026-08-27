@@ -56,7 +56,6 @@ globals = {
 	"SkadaDB",
 	"SkadaCharDB",
 	"SkadaDebugLog",
-	"SkadaLocaleDB",
 	"SkadaImprovementDB",
 	"SkadaStorageDB",
 

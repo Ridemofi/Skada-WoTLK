@@ -1,10 +1,8 @@
-# Skada WotLK (mod by Kappa)
+# Skada WotLK
 
 A maintenance fork of [Skada Revisited](https://github.com/bkader/Skada-WoTLK) by Kader (bkader), the modular damage meter for World of Warcraft 3.3.5a (WotLK, Interface 30300).
 
-This fork exists for two reasons: to fix bugs that were still present in the upstream release, and to add a complete Ukrainian localization. More than thirty defects were found and fixed, ranging from a performance problem that froze the client for seconds at a time to several latent crashes and a number of incorrect calculations. All fixes are described in detail below.
-
-Bug fixes, extensions and the Ukrainian translation by **Kappa**.
+This fork exists to fix bugs that were still present in the upstream release. More than thirty defects were found and fixed, ranging from a performance problem that froze the client for seconds at a time to several latent crashes and a number of incorrect calculations. All fixes are described in detail below.
 
 ## Requirements
 
@@ -25,16 +23,6 @@ Only `Skada` is enabled by default. `SkadaImprovement` and `SkadaStorage` ship w
 
 * **SkadaImprovement** records your own boss fight statistics over time so you can compare your performance across attempts.
 * **SkadaStorage** keeps combat segments in saved variables so they survive a logout, and warns you when memory usage grows too large.
-
-## Ukrainian localization
-
-The addon is displayed in Ukrainian by default. The translation is complete: all 809 strings are covered, with English used as the fallback for anything a future version adds.
-
-The 3.3.5a client has no `ukUA` game locale, so the usual AceLocale mechanism cannot be used for it. Instead the translations are stored separately and overlaid onto whichever locale the client is running, which means Ukrainian works correctly on an English or Russian client alike.
-
-To switch back to the client language, open `/skada config`, go to the General tab and turn off the option under "Мова / Language". The setting is account wide and requires a UI reload, which the addon will prompt for.
-
-Bundled languages are English, Russian and Ukrainian. The German, Spanish, French, Korean and Chinese translations that shipped upstream were removed. Players on those clients will see English as the base language, with the Ukrainian overlay applied on top unless they disable it.
 
 ## What is changed compared to the original
 
@@ -94,6 +82,6 @@ One deliberate non change is worth recording: in `Modules/Resurrects.lua` the `S
 
 * **Zarnivoop**, author of the original Skada.
 * **Kader (bkader)**, author of Skada Revisited, the fork this is based on.
-* **Kappa**, bug fixes, extensions and Ukrainian localization.
+* **Kappa**, bug fixes and extensions.
 
 Licensed under MIT/X, same as upstream.
