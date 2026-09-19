@@ -69,7 +69,7 @@ Only `Skada` is enabled by default. `SkadaImprovement` and `SkadaStorage` ship w
 
 ### Housekeeping
 
-* Version declared consistently in all three addons, currently 1.9.7. The two plugins previously had no version field at all.
+* Version declared consistently in all three addons, currently 1.9.8. The two plugins previously had no version field at all.
 * `X-Curse-Project-ID` removed, since this fork is not connected to the upstream Curse project.
 
 ## Not audited
