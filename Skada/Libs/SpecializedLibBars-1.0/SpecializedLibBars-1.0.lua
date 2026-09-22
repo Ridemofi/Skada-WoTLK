@@ -22,7 +22,7 @@ local callbacks = lib.callbacks
 -------------------------------------------------------------------------------
 
 local GetTime = GetTime
-local min, max, floor = math.min, math.max, math.floor
+local min, max, floor, abs = math.min, math.max, math.floor, math.abs
 local tsort, tinsert, tremove, wipe = table.sort, table.insert, table.remove, wipe
 local next, pairs, error, type, format = next, pairs, error, type, string.format
 local CreateFrame = CreateFrame
@@ -1832,6 +1832,9 @@ function barPrototype:OnBarReleased()
 	self:SetScript("OnEnter", nil)
 	self:SetScript("OnLeave", nil)
 	self:SetScript("OnUpdate", nil)
+	self.lastamt = nil
+	self.targetamt = nil
+	self.targetdist = nil
 	self:SetParent(UIParent)
 	self:ClearAllPoints()
 	self:Hide()
@@ -2085,33 +2088,49 @@ do
 		end
 	end
 
-	local function calc_last_amt(targetamt, lastamt)
-		if targetamt > lastamt then
-			return min(((targetamt - lastamt) / 4) + lastamt, targetamt)
-		end
-		return max(lastamt - ((lastamt - targetamt) / 4), targetamt)
-	end
+	-- improved bar animation with dynamic easing and framerate-independent smoothing
+	local ANIMATION_SPEED = 0.33
+	local ANIMATION_TRIGGER = 0.05
+	local ANIMATION_MAX_SPEED = 3.0
+	local ANIMATION_MIN_SPEED = 0.45
 
 	local function animate(self, elapsed)
-		local t = self.lastanimated + elapsed
-		if t >= 0.25 then
-			SetTextureValue(self, self.targetamt, self.targetdist)
-			self.lastamt = self.targetamt
+		if not self.ownerGroup or not self.lastamt or not self.targetamt then
 			self:SetScript("OnUpdate", nil)
-			t = 0
+			return
+		end
+
+		local diff = self.targetamt - self.lastamt
+		local distance = abs(diff)
+
+		local speed = ANIMATION_SPEED * max(min(distance / ANIMATION_TRIGGER, ANIMATION_MAX_SPEED), ANIMATION_MIN_SPEED)
+		local step = speed * max(0, elapsed)
+
+		if distance <= step then
+			self.lastamt = self.targetamt
+			SetTextureValue(self, self.lastamt, self.targetdist)
+			self:SetScript("OnUpdate", nil)
 		else
-			self.lastamt = calc_last_amt(self.targetamt, self.lastamt)
+			if diff > 0 then
+				self.lastamt = self.lastamt + step
+			else
+				self.lastamt = self.lastamt - step
+			end
 			SetTextureValue(self, self.lastamt, self.targetdist)
 		end
-		self.lastanimated = t
 	end
 
 	local function SetTextureTarget(self, amt, dist)
 		self.targetamt = amt
 		self.targetdist = dist
 
-		self.lastanimated = 0
-		self:SetScript("OnUpdate", animate)
+		if abs(amt - self.lastamt) < 0.0001 then
+			self.lastamt = amt
+			SetTextureValue(self, amt, dist)
+			self:SetScript("OnUpdate", nil)
+		else
+			self:SetScript("OnUpdate", animate)
+		end
 	end
 
 	function barPrototype:SetValue(val)
@@ -2134,7 +2153,10 @@ do
 		if ownerGroup.smoothing and self.lastamt then
 			SetTextureTarget(self, amt, dist)
 		else
+			self:SetScript("OnUpdate", nil)
 			self.lastamt = amt
+			self.targetamt = amt
+			self.targetdist = dist
 			SetTextureValue(self, amt, dist)
 		end
 
