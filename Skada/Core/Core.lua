@@ -3063,8 +3063,11 @@ function combat_end(curtime)
 	-- walking out of the fight with the group still standing is the kill: an
 	-- actual wipe leaves everyone dead and is caught here first. autostop is not
 	-- involved, so this holds whether or not the user enabled it.
+	-- the group has to be out of combat as well: a raider who dies and releases
+	-- ends the segment while the rest still fight on, and two Thorim wipes were
+	-- saved as kills that way (Ulduar, 2026-10-07).
 	if not Skada.current.success and Skada.current.gotboss and not IsGroupDead()
-		and is_undying_boss(Skada.current) then
+		and not IsGroupInCombat() and is_undying_boss(Skada.current) then
 		Skada.current.success = true
 		if Skada.debuglog_on then Skada.current.success_src = "never-dies" end
 		Skada:LogDebug("boss", "%s does not die as a unit and the group is still up, counting it as a kill",
