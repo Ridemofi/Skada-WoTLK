@@ -2328,6 +2328,9 @@ do
 
 	-- combat log handler
 	function Skada:ParseCombatLog(_, timestamp, event, ...)
+		-- proof of life for the combat log watchdog in Core.lua
+		self._cleu = (self._cleu or 0) + 1
+
 		-- disabled or test mode?
 		if self.disabled or self.testMode then return end
 

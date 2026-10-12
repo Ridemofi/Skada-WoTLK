@@ -17,6 +17,7 @@ local InCombatLockdown, IsGroupInCombat, IsGroupDead = InCombatLockdown, Skada.I
 local UnitGUID, GameTooltip, ReloadUI = UnitGUID, GameTooltip, ReloadUI
 local IsShiftKeyDown, IsControlKeyDown = IsShiftKeyDown, IsControlKeyDown
 local SecondsToTime, time, GetTime = SecondsToTime, time, GetTime
+local CombatLogClearEntries = CombatLogClearEntries
 local IsInGroup, IsInRaid, IsInPvP = Skada.IsInGroup, Skada.IsInRaid, Skada.IsInPvP
 local GetNumGroupMembers, CheckDuplicate = Skada.GetNumGroupMembers, Private.CheckDuplicate
 local L, callbacks, O = Skada.Locale, Skada.callbacks, Skada.options.args
@@ -203,6 +204,45 @@ local function boss_split_time()
 	return max(5, P.bosssplittime or BOSS_SPLIT_TIME)
 end
 
+-- the 3.3.5 client can stop handing the combat log to addons altogether until
+-- its entries are cleared or the UI is reloaded. one RS 25 run (2026-10-11)
+-- saved Baltharus and Saviana as kills with no actor, no damage and no healing
+-- at all: 91 and 105 s in combat without a single event. Skada._cleu counts
+-- every event ParseCombatLog is handed, so us in combat with that counter
+-- standing still means the log is dead, and clearing it is what brings it back.
+-- this runs whether or not the Tweaks combat log fix is on.
+local CLEU_QUIET_TIMEOUT = 5
+ns.CLEU_QUIET_TIMEOUT = CLEU_QUIET_TIMEOUT
+local cleu_seen, cleu_quiet_since = nil, nil
+local cleu_kicks, cleu_kicked = 0, nil -- kicks this segment, and one still unanswered
+
+local function check_combat_log(lockdown)
+	local seen = Skada._cleu
+	if seen ~= cleu_seen then
+		if cleu_kicked then
+			cleu_kicked = nil
+			Skada:Debug("\124cffffbb00CombatLog\124r: Back")
+			Skada:LogDebug("combat", "the combat log is back after %d kick(s)", cleu_kicks)
+		end
+		cleu_seen, cleu_quiet_since = seen, nil
+		return
+	elseif not lockdown then
+		cleu_quiet_since = nil
+		return
+	end
+
+	local now = GetTime()
+	cleu_quiet_since = cleu_quiet_since or now
+	if now - cleu_quiet_since < CLEU_QUIET_TIMEOUT then return end
+
+	cleu_quiet_since = now -- one kick per timeout, for as long as it stays dead
+	cleu_kicks, cleu_kicked = cleu_kicks + 1, true
+	CombatLogClearEntries()
+	Skada:Debug("\124cffffbb00CombatLog\124r: Cleared")
+	Skada:LogDebug("combat", "no combat log event for %d s while in combat, cleared its entries (kick %d)",
+		CLEU_QUIET_TIMEOUT, cleu_kicks)
+end
+
 local out_of_combat_since = nil
 
 local function reset_tick_stats()
@@ -212,6 +252,7 @@ local function reset_tick_stats()
 	pet_holder.event, pet_holder.src, pet_holder.dst, pet_holder.spell, pet_holder.at = nil, nil, nil, nil, nil
 	pets_holding = nil
 	dropped_events, dropped_time, stopped_since = 0, 0, nil
+	cleu_kicks, cleu_quiet_since = 0, nil
 	out_of_combat_since, autostop_deadline = nil, nil
 end
 
@@ -3105,6 +3146,9 @@ function combat_end(curtime)
 			Skada:LogDebug("segment", "  dropped %d combat log events over %.1f s while the segment was stopped",
 				dropped_events, stopped_seconds())
 		end
+		if cleu_kicks > 0 then
+			Skada:LogDebug("segment", "  the combat log went silent in combat and was cleared %d time(s)", cleu_kicks)
+		end
 	end
 
 	Private.ClearTempUnits()
@@ -3411,6 +3455,8 @@ do
 		if lockdown then tick_stats.lockdown = tick_stats.lockdown + 1 end
 		if group then tick_stats.group = tick_stats.group + 1 end
 		if pets then tick_stats.pets = tick_stats.pets + 1 end
+
+		check_combat_log(lockdown)
 
 		-- pvp and arena segments are ended by their own events
 		if Skada.insType == "pvp" or Skada.insType == "arena" then return end
