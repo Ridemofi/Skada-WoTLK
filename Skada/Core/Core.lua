@@ -698,6 +698,42 @@ local function summon_pet(petGUID, ownerGUID)
 	end
 end
 
+-- a hunter's snake trap is the one guardian the combat log hands to nobody:
+-- the hunter creates the trap (SPELL_CREATE 34600) and the snakes are summoned
+-- later by a "World Invisible Trigger" (SPELL_SUMMON 57879), so every snake got
+-- a row of its own, 64 of them over one raid evening (2026-10-11). the trap and
+-- the trigger share no guid, so the snakes go to whoever in the group placed a
+-- snake trap last. the kept ICC log has the summon 1 to 20 s after the trap;
+-- the window is that with room to spare.
+local snake_trap_placed, snake_trap_owner
+do
+	local SNAKE_TRAP, SNAKE_TRAP_EFFECT = 34600, 57879
+	local SNAKE_TRAP_WINDOW = 60
+	local snake_traps = {} -- [hunter guid] = when the trap went down
+
+	function snake_trap_placed(t)
+		if t.spellid == SNAKE_TRAP and t.event == "SPELL_CREATE" and guidToName[t.srcGUID] then
+			snake_traps[t.srcGUID] = GetTime()
+		end
+	end
+
+	-- the hunter to hand this summon to, if it is a snake trap going off
+	function snake_trap_owner(t)
+		if t.spellid ~= SNAKE_TRAP_EFFECT then return end
+
+		local oldest = GetTime() - SNAKE_TRAP_WINDOW
+		local owner, latest = nil, nil
+		for guid, at in next, snake_traps do
+			if at < oldest then
+				snake_traps[guid] = nil
+			elseif guidToName[guid] and (not latest or at > latest) then
+				owner, latest = guid, at
+			end
+		end
+		return owner
+	end
+end
+
 local dismiss_pet
 do
 	local dismiss_timers = nil
@@ -3823,6 +3859,9 @@ do
 	local dst_is_interesting = false
 
 	function Skada:OnCombatEvent(t)
+		-- SPELL_CREATE is ignored below, and a trap goes down before the pull
+		snake_trap_placed(t)
+
 		-- ignored combat event?
 		if (not t.event or ignored_events[t.event]) and not (spellcast_events[t.event] and self.current) then return end
 
@@ -3858,6 +3897,11 @@ do
 		-- shaman's chain is player > totem > elemental.
 		if t.event == "SPELL_SUMMON" and (t:SourceInGroup() or guidToOwner[t.srcGUID]) and t:DestIsPet() then
 			summon_pet(t.dstGUID, t.srcGUID)
+		elseif t.event == "SPELL_SUMMON" and t:DestIsPet() then
+			local hunter = snake_trap_owner(t)
+			if hunter then
+				summon_pet(t.dstGUID, hunter)
+			end
 		-- pet died?
 		elseif death_events[t.event] and guidToOwner[t.dstGUID] then
 			dismiss_pet(t.dstGUID, 1)
