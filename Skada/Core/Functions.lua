@@ -1175,6 +1175,127 @@ do
 end
 
 -------------------------------------------------------------------------------
+-- one-time offer of the tested defaults
+--
+-- changing Skada.defaults only reaches brand new profiles: AceDB fills a
+-- profile once, so anyone who already played keeps whatever the old defaults
+-- wrote. this asks them once, on login, whether to take the new values.
+--
+-- only the settings below are touched. fonts, colors, textures and the window
+-- position stay as the user set them, which is the whole point of asking
+-- instead of resetting the profile.
+
+do
+	local ConfirmDialog = Private.ConfirmDialog
+
+	-- bumped whenever a new batch of defaults is worth offering again
+	local RECOMMENDED_VERSION = 1
+
+	local recommended = {
+		alwayskeepbosses = true,
+		smartstop = true,
+		smartwait = 0.5,
+		showtotals = true,
+		dropwipes = false,
+		setstokeep = 25
+	}
+
+	local recommended_report = {
+		mode = "Enemy Damage Taken",
+		channel = "raid",
+		number = 25
+	}
+
+	local recommended_columns = {
+		Skada_Deaths_Source = true,
+		Skada_Deaths_Survivability = true
+	}
+
+	local recommended_unblocked = {
+		"Improvement",
+		"Overhealing",
+		"Overkill",
+		"Total Healing",
+		"Useful Damage"
+	}
+
+	local t = {timeout = 0, whileDead = 1}
+
+	local function apply()
+		local P = Skada.profile
+		if not P then return end
+
+		for key, value in pairs(recommended) do
+			P[key] = value
+		end
+
+		P.report = P.report or {}
+		for key, value in pairs(recommended_report) do
+			P.report[key] = value
+		end
+
+		P.columns = P.columns or {}
+		for key, value in pairs(recommended_columns) do
+			P.columns[key] = value
+		end
+
+		P.modulesBlocked = P.modulesBlocked or {}
+		for i = 1, #recommended_unblocked do
+			P.modulesBlocked[recommended_unblocked[i]] = nil
+		end
+
+		P.recommended = RECOMMENDED_VERSION
+		-- the segment cap is derived from setstokeep and only refreshed by the
+		-- options panel, so bring it along or the old cap trims until a reload.
+		Skada.maxsets = P.setstokeep + (P.setslimit or 0)
+
+		-- unblocking a module only takes effect once it is loaded
+		Skada:ApplySettings()
+		Skada:NotifyChange()
+		Skada:Print(L["Recommended settings applied. Reload to load the newly enabled modules."])
+	end
+
+	local function decline()
+		if Skada.profile then
+			Skada.profile.recommended = RECOMMENDED_VERSION
+		end
+	end
+
+	-- the answer belongs to the profile, since that is where the settings live:
+	-- a character on a profile of its own has to be asked for that profile.
+	--
+	-- set from the OnNewProfile and OnProfileReset callbacks: a profile AceDB
+	-- has just built from the defaults already carries the new values, so there
+	-- is nothing to offer. it can run from inside OnInitialize, before
+	-- Skada.profile is assigned, hence the db the callback hands over.
+	--
+	-- never put "recommended" in Skada.defaults: AceDB would then hand the
+	-- current version to every old profile that never answered.
+	function Skada:MarkProfileCurrent(_, db)
+		local profile = db and db.profile
+		if profile then
+			profile.recommended = RECOMMENDED_VERSION
+		end
+	end
+
+	function Skada:OfferRecommendedSettings()
+		local P = self.profile
+		if not P or (P.recommended or 0) >= RECOMMENDED_VERSION then return end
+
+		-- the first version of this asked once per account, not per profile.
+		-- an account that answered back then is not asked again: its answer
+		-- stands for every profile it had.
+		local G = self.global
+		if G and G.recommended == RECOMMENDED_VERSION then
+			P.recommended = RECOMMENDED_VERSION
+			return
+		end
+
+		ConfirmDialog(L["opt_recommended_settings_ask"], apply, decline, t)
+	end
+end
+
+-------------------------------------------------------------------------------
 -- bossmods callbacks
 
 local find, lower = string.find, string.lower
@@ -1510,10 +1631,14 @@ do
 				self:Debug(format("Unknown unit detected: \124cffffbb00%s\124r (%s)", actorname, actorid))
 			end
 
-			self:LogDebug("actor", "created %s (%s) class=%s enemy=%s fake=%s flags=%s",
-				tostring(actorname), tostring(actorid), tostring(actor.class),
-				tostring(actor.enemy), tostring(actor.fake),
-				type(actorflags) == "number" and Private.DecodeFlags(actorflags) or tostring(actorflags))
+			-- guarded: the arguments are built before LogDebug can bail out,
+			-- and DecodeFlags allocates for every actor of every segment.
+			if self.debuglog_on then
+				self:LogDebug("actor", "created %s (%s) class=%s enemy=%s fake=%s flags=%s",
+					tostring(actorname), tostring(actorid), tostring(actor.class),
+					tostring(actor.enemy), tostring(actor.fake),
+					type(actorflags) == "number" and Private.DecodeFlags(actorflags) or tostring(actorflags))
+			end
 
 			for _, mode in pairs(modes) do
 				-- common
@@ -1695,7 +1820,9 @@ do
 			if not guid then return end
 
 			-- recently failed to resolve? don't hammer the client again.
-			local now = Skada._Time or GetTime()
+			-- GetTime, not Skada._Time: that one stands still out of combat, and
+			-- a failure cached then would never expire until the next fight.
+			local now = GetTime()
 			if unknown_pets[guid] and now < unknown_pets[guid] then return end
 
 			-- guess the pet from roster. only a complete resolve counts as a
@@ -1707,6 +1834,9 @@ do
 				local ownerGUID, ownerName = UnitGUID(ownerUnit), UnitFullName(ownerUnit)
 				if ownerGUID and ownerName then
 					guidToOwner[guid] = ownerGUID
+					if Skada.debuglog_on then
+						Skada:LogDebugOnce("petowner:" .. guid, "pet", "%s resolved to %s from the roster", guid, ownerName)
+					end
 					return ownerGUID, ownerName
 				end
 			end
@@ -1715,7 +1845,15 @@ do
 			local ownerGUID, ownerName = GetPetOwnerFromTooltip(guid)
 			if ownerGUID and ownerName then
 				guidToOwner[guid] = ownerGUID
+				if Skada.debuglog_on then
+					Skada:LogDebugOnce("petowner:" .. guid, "pet", "%s resolved to %s from the tooltip", guid, ownerName)
+				end
 				return ownerGUID, ownerName
+			end
+
+			if Skada.debuglog_on then
+				Skada:LogDebugOnce("petowner:" .. guid, "pet", "%s has no owner we can find (cachedClass=%s)",
+					guid, tostring(guidToClass[guid]))
 			end
 
 			-- couldn't resolve the owner: cache the failure.
@@ -2190,6 +2328,9 @@ do
 
 	-- combat log handler
 	function Skada:ParseCombatLog(_, timestamp, event, ...)
+		-- proof of life for the combat log watchdog in Core.lua
+		self._cleu = (self._cleu or 0) + 1
+
 		-- disabled or test mode?
 		if self.disabled or self.testMode then return end
 

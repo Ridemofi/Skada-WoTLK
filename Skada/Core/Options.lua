@@ -5,7 +5,7 @@ local L = Skada.Locale
 local ACD = LibStub("AceConfigDialog-3.0")
 local ACR = LibStub("AceConfigRegistry-3.0")
 
-local min, max = math.min, math.max
+local min, max, floor = math.min, math.max, math.floor
 local next, format = next, format or string.format
 local wipe, del = wipe, Private.delTable
 local ConfirmDialog = Private.ConfirmDialog
@@ -97,6 +97,7 @@ Private.tCopy(windefaultscopy, Skada.windowdefaults)
 
 Skada.defaults = {
 	profile = {
+		alwayskeepbosses = true,
 		firsthit = true,
 		hidedisables = true,
 		informativetooltips = true,
@@ -105,6 +106,8 @@ Skada.defaults = {
 		setnumber = true,
 		realmless = true,
 		showranks = true,
+		showtotals = true,
+		smartstop = true,
 		tooltips = true,
 		brackets = 1,
 		decimals = 1,
@@ -114,15 +117,15 @@ Skada.defaults = {
 		separator = 1,
 		setformat = 3,
 		setslimit = 15,
-		setstokeep = 15,
-		smartwait = 3,
+		setstokeep = 25,
+		smartwait = 0.5,
 		combatgrace = 3,
 		stalecombat = true,
 		stalecombattime = 10,
 		autostopclose = 5,
 		bosssplit = true,
 		bosssplittime = 30,
-		keepwipes = false,
+		dropwipes = false,
 		minattemptdps = 1000,
 		trashrename = true,
 		timemesure = 2,
@@ -131,10 +134,10 @@ Skada.defaults = {
 		updatefrequency = 0.5,
 		feed = "",
 		tooltippos = "smart",
-		columns = {},
+		columns = {Skada_Deaths_Source = true, Skada_Deaths_Survivability = true},
 		icon = {radius = 80, minimapPos = 195},
 		modules = {},
-		report = {mode = "Damage", set = "current", channel = "Say", chantype = "preset", number = 10},
+		report = {mode = "Enemy Damage Taken", set = "current", channel = "raid", chantype = "preset", number = 25},
 		reset = {instance = 1, join = 3, leave = 1},
 		toast = {spawn_point = "BOTTOM", duration = 5, opacity = 0.75},
 		modulesBlocked = {
@@ -152,15 +155,10 @@ Skada.defaults = {
 			["Healing Done By Spell"] = true,
 			["Healing Taken"] = true,
 			["Healthstones"] = true,
-			["Improvement"] = true,
 			["Killing Blows"] = true,
 			["My Spells"] = true,
-			["Overhealing"] = true,
-			["Overkill"] = true,
 			["Player vs. Player"] = true,
 			["Themes"] = true,
-			["Total Healing"] = true,
-			["Useful Damage"] = true,
 			-- display systems
 			["Inline Bar Display"] = true,
 			["Legacy Bar Display"] = true,
@@ -380,6 +378,11 @@ options.args.generaloptions = {
 							order = 1,
 							-- stored by the SkadaLocale addon, which loads
 							-- before Skada so Init.lua can read it in time.
+							-- it is optional: without it there is nowhere to
+							-- keep the flag, so the toggle would do nothing.
+							disabled = function()
+								return SkadaLocaleDB == nil
+							end,
 							get = function()
 								return not (SkadaLocaleDB and SkadaLocaleDB.uklang == false)
 							end,
@@ -1081,20 +1084,20 @@ options.args.tweaks = {
 						}
 					}
 				},
-				keepwipes_opt = {
+				dropwipes_opt = {
 					type = "group",
-					name = L["Keep Failed Attempts"],
-					desc = format(L["Options for %s."], L["Keep Failed Attempts"]),
+					name = L["Drop Failed Attempts"],
+					desc = format(L["Options for %s."], L["Drop Failed Attempts"]),
 					order = 23,
 					args = {
-						keepwipesdesc = {
+						dropwipesdesc = {
 							type = "description",
-							name = L["opt_tweaks_keepwipes_desc"],
+							name = L["opt_tweaks_dropwipes_desc"],
 							fontSize = "medium",
 							order = 10,
 							width = "full"
 						},
-						keepwipes = {
+						dropwipes = {
 							type = "toggle",
 							name = L["Enable"],
 							disabled = function()
@@ -1102,10 +1105,10 @@ options.args.tweaks = {
 							end,
 							order = 20
 						},
-						keepwipesnote = {
+						dropwipesnote = {
 							type = "description",
 							name = function()
-								return format(L["opt_tweaks_keepwipes_note"], L["Always save boss fights"])
+								return format(L["opt_tweaks_dropwipes_note"], L["Always save boss fights"])
 							end,
 							order = 30,
 							width = "full"
@@ -1259,7 +1262,7 @@ do
 		if not initOptions then
 			initOptions = {
 				type = "group",
-				name = format("\124T%s:18:18:0:0:32:32:2:30:2:30\124t \124cffffd200Skada\124r \124cffffffff%s\124r", Skada.logo, L["A damage meter."]),
+				name = format("\124T%s:18:18\124t \124cffffd200Skada\124r \124cffffffff%s\124r", Skada.logo, L["A damage meter."]),
 				args = {
 					open = {
 						type = "execute",
@@ -1318,6 +1321,13 @@ do
 	end
 end
 
+-- option groups whose children are plain groups: AceGUI draws those as a
+-- second tree inside the tab, the one the divider belongs to.
+local nested_trees = {
+	{"generaloptions", "general"},
+	{"tweaks", "advanced"}
+}
+
 function Private.OpenOptions(win)
 	if not ACR:GetOptionsTable(folder) then
 		LibStub("AceConfig-3.0"):RegisterOptionsTable(folder, options)
@@ -1325,6 +1335,18 @@ function Private.OpenOptions(win)
 		-- the longer slider labels outright. the window is still resizable,
 		-- this only sets what it opens at.
 		ACD:SetDefaultSize(folder, 780, 560)
+
+		-- a nested option group is drawn as a second tree inside the tab, and
+		-- AceGUI gives every tree the same fixed 175px however wide the pane
+		-- it sits in is, so on the widened window the divider sat well left of
+		-- centre. split the pane the tab actually gets instead: the window
+		-- less the outer tree and the padding AceGUI puts between the two.
+		local pane = 780 - 175 - 20
+		for i = 1, #nested_trees do
+			local status = ACD:GetStatusTable(folder, nested_trees[i])
+			status.groups = status.groups or {}
+			status.groups.treewidth = floor(pane * 0.5)
+		end
 	end
 
 	if not ACD:Close(folder) then
@@ -1415,7 +1437,6 @@ end
 do
 	local get_screen_width
 	do
-		local floor = math.floor
 		local GetScreenWidth = GetScreenWidth
 		local screenWidth = nil
 		function get_screen_width()

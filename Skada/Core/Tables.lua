@@ -735,6 +735,7 @@ ns.creature_to_boss = {
 	[33432] = 33350, -- Leviathan Mk II > Mimiron
 	[33651] = 33350, -- VX-001 > Mimiron
 	[33670] = 33350, -- Aerial Command Unit > Mimiron
+	[33524] = 33271, -- Saronite Animus > General Vezax (hard mode add)
 
 	-- the heart is exposed at 75/50/25% and LibBossIDs calls it a boss of its
 	-- own, which split one fight into a boss segment per phase. it is an add:
@@ -759,9 +760,10 @@ ns.creature_to_boss = {
 -- carries "any", in which case the first of them to die ends it.
 --
 -- fights left out on purpose, they have no death to key on and still need a
--- boss mod: Valithria Dreamwalker (healed, never dies), Faction Champions
--- (only part of the roster spawns), and Mimiron and the Icecrown Gunship
--- Battle, whose fights boss_never_dies below closes instead.
+-- boss mod: Valithria Dreamwalker (healed, never dies), and three fights
+-- closed by the tables below instead: Faction Champions (fight_roster, only
+-- part of the roster spawns), Mimiron and the Icecrown Gunship Battle
+-- (boss_never_dies).
 
 ns.fight_to_boss = {
 	[L["Ingvar the Plunderer"]] = 23980, -- only the undead Ingvar stays down
@@ -812,6 +814,53 @@ ns.boss_never_dies = {
 	-- commanders survive. the ships are the only ids the fight can be keyed on.
 	[37215] = true, -- Orgrim's Hammer
 	[37540] = true -- The Skybreaker
+}
+
+-------------------------------------------------------------------------------
+-- fight_roster
+-- fights that draw a random line-up from a larger pool, so no fixed list of
+-- deaths can end them. the kill is every pool member the segment logged as an
+-- enemy lying dead; whoever never spawned is never waited for. pets and
+-- minions are left out, they do not have to die.
+--
+-- DBM on 3.3.5 called a clean 25h Faction Champions kill a wipe 17 s after the
+-- last champion died (2026-09-26), so the boss mod cannot be relied on here.
+-- the ids are DBM's own killMobs for the fight.
+
+ns.fight_roster = {
+	[L["Faction Champions"]] = {
+		-- Champions of the Alliance
+		[34461] = true, -- Tyrius Duskblade <Death Knight>
+		[34460] = true, -- Kavina Grovesong <Druid>
+		[34469] = true, -- Melador Valestrider <Druid>
+		[34467] = true, -- Alyssia Moonstalker <Hunter>
+		[34468] = true, -- Noozle Whizzlestick <Mage>
+		[34465] = true, -- Velanaa <Paladin>
+		[34471] = true, -- Baelnor Lightbearer <Paladin>
+		[34466] = true, -- Anthar Forgemender <Priest>
+		[34473] = true, -- Brienna Nightfell <Priest>
+		[34472] = true, -- Irieth Shadowstep <Rogue>
+		[34463] = true, -- Shaabad <Shaman>
+		[34470] = true, -- Saamul <Shaman>
+		[34474] = true, -- Serissa Grimdabbler <Warlock>
+		[34475] = true, -- Shocuul <Warrior>
+
+		-- Champions of the Horde
+		[34441] = true, -- Vivienne Blackwhisper <Priest>
+		[34444] = true, -- Thrakgar <Shaman>
+		[34445] = true, -- Liandra Suncaller <Paladin>
+		[34447] = true, -- Caiphus the Stern <Priest>
+		[34448] = true, -- Ruj'kah <Hunter>
+		[34449] = true, -- Ginselle Blightslinger <Mage>
+		[34450] = true, -- Harkzog <Warlock>
+		[34451] = true, -- Birana Stormhoof <Druid>
+		[34453] = true, -- Narrhok Steelbreaker <Warrior>
+		[34454] = true, -- Maz'dinah <Rogue>
+		[34455] = true, -- Broln Stouthorn <Shaman>
+		[34456] = true, -- Malithas Brightblade <Paladin>
+		[34458] = true, -- Gorgrim Shadowcleave <Death Knight>
+		[34459] = true -- Erin Misthoof <Druid>
+	}
 }
 
 -------------------------------------------------------------------------------

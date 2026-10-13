@@ -5,7 +5,7 @@ ns.author = GetAddOnMetadata(folder, "Author")
 ns.version = GetAddOnMetadata(folder, "Version")
 ns.date = GetAddOnMetadata(folder, "X-Date")
 ns.website = "https://github.com/myroslav-bakuta/Skada-WoTLK"
-ns.logo = [[Interface\ICONS\spell_lightning_lightningbolt01]]
+ns.logo = [[Interface\AddOns\Skada\Media\Textures\Logo]]
 ns.revisited = true -- Skada-Revisited flag
 ns.Private = {} -- holds private stuff
 ns.Locale = LibStub("AceLocale-3.0"):GetLocale(folder)
@@ -20,8 +20,9 @@ ns.callbacks = LibStub("CallbackHandler-1.0"):New(ns)
 -- SkadaDB is still nil right here. Tables.lua and Options.lua read L[...] while
 -- they load, which fixes every string before SkadaDB ever appears -- that is
 -- why the toggle used to do nothing. SkadaLocale is a separate addon listed in
--- ## Dependencies, so it is fully loaded (and its saved variable restored)
--- before this line runs. nil means "default on".
+-- ## OptionalDeps, so when installed it is fully loaded (and its saved
+-- variable restored) before this line runs. nil means "default on", which
+-- is also what a Skada installed without SkadaLocale gets.
 if ns.ukLocale then
 	if not (SkadaLocaleDB and SkadaLocaleDB.uklang == false) then
 		for key, value in pairs(ns.ukLocale) do
@@ -929,6 +930,12 @@ do
 		return ok and str or gsub(gsub(fstr, "(%%+)([^%%%s<]+)", replace), "%%%%", "%%")
 	end
 
+	-- a key or click and what it does, on one tooltip row: the key on
+	-- the left in the key colour (e8c07a), the action on the right.
+	function Private.AddKeyLine(tooltip, key, action)
+		tooltip:AddDoubleLine(key, action, 0.91, 0.75, 0.48, 1, 1, 1)
+	end
+
 	Private.WrapTextInColorCode = _G.WrapTextInColorCode
 	if not Private.WrapTextInColorCode then
 		Private.WrapTextInColorCode = function(text, colorHexString)
@@ -1639,6 +1646,14 @@ do
 	end
 	Private.UnitFullName = UnitFullName
 
+	-- what UnitName returns until the client has loaded a unit's name
+	local unknown_names = {}
+	for _, key in ipairs({"UNKNOWN", "UNKNOWNOBJECT", "UKNOWNBEING"}) do
+		if _G[key] then
+			unknown_names[_G[key]] = true
+		end
+	end
+
 	-- adds a combatant
 	function Private.AddCombatant(unit, ownerUnit)
 		local guid = UnitGUID(unit)
@@ -1654,7 +1669,14 @@ do
 		-- for players...
 		local _, class = UnitClass(unit)
 		guidToClass[guid] = class
-		guidToName[guid] = UnitFullName(unit)
+
+		-- a name not loaded yet stays out of the cache, or every combat log
+		-- event of this player would be renamed to "Unknown" (UNIT_NAME_UPDATE
+		-- fills it in later).
+		local name = UnitName(unit)
+		if name and not unknown_names[name] then
+			guidToName[guid] = UnitFullName(unit)
+		end
 	end
 end
 
