@@ -64,10 +64,11 @@ L["Height"] = true
 L["The height of %s."] = true
 L["Active Time"] = true
 L["Segment Time"] = true
-L["Click for \124cff00ff00%s\124r"] = true
-L["Shift-Click for \124cff00ff00%s\124r"] = true
-L["Control-Click for \124cff00ff00%s\124r"] = true
-L["Alt-Click for \124cff00ff00%s\124r"] = true
+L["Left-Click"] = true
+L["Right-Click"] = true
+L["Shift+Left-Click"] = true
+L["Ctrl+Left-Click"] = true
+L["Alt+Left-Click"] = true
 L["Toggle Class Filter"] = true
 L["Average"] = true
 L["Minimum"] = _G.MINIMUM
@@ -331,9 +332,8 @@ L["opt_useframe_desc"] = "Shows a standalone frame. Not needed if you are using 
 L["Text Color"] = true
 L["The text color of %s."] = true
 L["Choose the default color."] = true
-L["Hint: Left-Click to set active mode."] = true
-L["Right-Click to set active set."] = true
-L["Shift+Left-Click to open menu."] = true
+L["Set active mode"] = true
+L["Set active segment"] = true
 -- data resets
 L["Data Resets"] = true
 L["Reset"] = _G.RESET
@@ -350,6 +350,8 @@ L["There is no data to reset."] = true
 L["Skip reset dialog"] = true
 L["opt_skippopup_desc"] = "Enable this if you want Skada to reset without the confirmation dialog."
 L["Are you sure you want to reinstall Skada?"] = true
+L["opt_recommended_settings_ask"] = "Skada now ships with a set of tested defaults for segment handling, reporting and a few extra modules.\n\nApply them to this profile? Your fonts, colors, textures and window position are not touched."
+L["Recommended settings applied. Reload to load the newly enabled modules."] = true
 -- general options
 L["Show minimap button"] = true
 L["Toggles showing the minimap button."] = true
@@ -490,11 +492,7 @@ L["Middle Button"] = _G.KEY_BUTTON3
 L["Mouse Button 4"] = _G.KEY_BUTTON4
 L["Mouse Button 5"] = _G.KEY_BUTTON5
 -- minimap button
-L["Skada Summary"] = true
-L["\124cff00ff00Left-Click\124r to toggle windows."] = true
-L["\124cff00ff00Ctrl+Left-Click\124r to show/hide windows."] = true
-L["\124cff00ff00Shift+Left-Click\124r to reset."] = true
-L["\124cff00ff00Right-Click\124r to open menu."] = true
+L["Open Menu"] = true
 -- skada menu
 L["Skada Menu"] = true
 L["Select Segment"] = true
@@ -515,17 +513,17 @@ L["Configure"] = true
 L["Open Config"] = true
 L["btn_config_desc"] = "Opens the configuration window."
 L["btn_reset_desc"] = [[Resets all fight data except those marked as kept.
-|cff00ff00Shift-LMB|r: Delete segment.]]
+|cffe8c07aShift+Left-Click|r: delete segment.]]
 L["Segment"] = true
 L["btn_segment_desc"] = [[Jump to a specific segment.
-|cff00ff00Shift-LMB|r for |cffffbb00next|r segment.
-|cff00ff00Shift-RMB|r for |cffffbb00previous|r segment.
-|cff00ff00Middle-Click|r for |cffffbb00current|r segment.]]
+|cffe8c07aShift+Left-Click|r: next segment.
+|cffe8c07aShift+Right-Click|r: previous segment.
+|cffe8c07aMiddle-Click|r: current segment.]]
 L["Mode"] = true
 L["Jump to a specific mode."] = true
 L["Report"] = true
 L["btn_report_desc"] = [[Opens a dialog that lets you report your data to others in various ways.
-|cff00ff00Shift-Click|r to Quick Report.]]
+|cffe8c07aShift+Left-Click|r: quick report.]]
 L["Stop"] = "Stop/Resume"
 L["btn_stop_desc"] = "Stops or resumes the current segment. Useful for discounting data after a wipe. Can also be set to automatically stop in the settings."
 L["Segment Stopped."] = true
@@ -830,12 +828,12 @@ L["Trash Time"] = true
 L["opt_tweaks_bosssplit_desc"] = "A trash pull that runs into a boss used to hand the boss all of that trash, which stretches the fight and drags everyone's numbers down. Once a segment has been running on other targets for a while and only then meets a boss, Skada closes that segment and opens a clean one for the boss."
 L["opt_tweaks_bosssplittime_desc"] = "How long a segment must have been running on other targets before a boss gets a segment of its own."
 L["opt_tweaks_bosssplit_note"] = "\n|cffffbb00Note:|r only a segment that started on something else can be split, so a boss you pull directly always keeps its own segment."
-L["Keep Failed Attempts"] = true
-L["opt_tweaks_keepwipes_desc"] = "A successful boss kill stops the earlier failed attempts from being kept, so the segment list is not cluttered with records nobody needs. Turn this on to keep every attempt instead."
-L["opt_tweaks_keepwipes_note"] = "\n|cffffbb00Note:|r kept segments hold their place until you delete them, so a great many wipes can fill the segment list. Needs \"%s\"."
+L["Drop Failed Attempts"] = true
+L["opt_tweaks_dropwipes_desc"] = "Failed attempts on a boss are saved the same as a kill and stay until you delete them. Turn this on to have a successful kill drop the earlier failed attempts on that same boss."
+L["opt_tweaks_dropwipes_note"] = "\n|cffffbb00Note:|r a released segment is not deleted at once, it just loses its reserved place and is trimmed like any other once the list is full. Only attempts on the boss you killed are released. Needs \"%s\"."
 L["Minimum Attempt DPS"] = true
 L["opt_tweaks_minattemptdps_desc"] = "The damage per second the raid has to deal before a pull counts as a real attempt worth saving the segment for. A pet that pulled a boss, or a boss that evaded at once, leaves a segment carrying the boss name and almost nothing else."
-L["opt_tweaks_minattemptdps_note"] = "\n|cffffbb00Note:|r a kill is always saved, whatever damage it dealt, and a pull the raid never entered combat for is never saved. Set to zero to judge attempts by that alone."
+L["opt_tweaks_minattemptdps_note"] = "\n|cffffbb00Note:|r a kill is always saved, whatever damage it dealt. Zero turns this damage check off, leaving only the other rule: a pull the raid never entered combat for is never saved."
 L["Name Segments By Main Enemy"] = "Trash Pull Segment Name"
 L["opt_tweaks_trashrename_desc"] = "A segment takes its name from the first mob the combat log happens to name (in a raid that is often an ordinary mob out of the trash pack). With this on the segment is named after the mob the raid actually fought, rather than after a boss."
 L["opt_tweaks_trashrename_note"] = "\n|cffffbb00Note:|r boss fights already carry the right name and are never renamed."

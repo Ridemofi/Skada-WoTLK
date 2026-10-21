@@ -17,6 +17,7 @@ local InCombatLockdown, IsGroupInCombat, IsGroupDead = InCombatLockdown, Skada.I
 local UnitGUID, GameTooltip, ReloadUI = UnitGUID, GameTooltip, ReloadUI
 local IsShiftKeyDown, IsControlKeyDown = IsShiftKeyDown, IsControlKeyDown
 local SecondsToTime, time, GetTime = SecondsToTime, time, GetTime
+local CombatLogClearEntries = CombatLogClearEntries
 local IsInGroup, IsInRaid, IsInPvP = Skada.IsInGroup, Skada.IsInRaid, Skada.IsInPvP
 local GetNumGroupMembers, CheckDuplicate = Skada.GetNumGroupMembers, Private.CheckDuplicate
 local L, callbacks, O = Skada.Locale, Skada.callbacks, Skada.options.args
@@ -83,6 +84,34 @@ local function track_fight_kills(fight)
 	end
 end
 
+-- guids of fight_roster members that died in the current segment.
+local roster_dead = nil
+
+-- a fight with a random line-up (see fight_roster) is won once every pool
+-- member the segment logged as an enemy has died. runs on deaths only, and
+-- only for a pool member, so walking the actors costs a handful of passes.
+local function roster_defeated(set, id, guid)
+	local roster = Skada.fight_roster and Skada.fight_roster[set.mobname]
+	if not roster or not roster[id] or not guid then return false end
+
+	roster_dead = roster_dead or new()
+	roster_dead[guid] = true
+
+	local seen, alive = 0, 0
+	for _, actor in pairs(set.actors or Skada.dummyTable) do
+		if actor.enemy and actor.id and roster[GetCreatureId(actor.id)] then
+			seen = seen + 1
+			if not roster_dead[actor.id] then
+				alive = alive + 1
+			end
+		end
+	end
+
+	Skada:LogDebug("boss", "%s died (%s), %d of %d in the line-up still standing",
+		tostring(set.mobname), tostring(id), alive, seen)
+	return seen > 0 and alive == 0
+end
+
 -- "36939, 37200 (any)" out of the ids still owed, for the debug log only.
 local function pending_kills_str()
 	if not pending_kills then return "no" end
@@ -103,7 +132,18 @@ local pet_activity = nil
 -- diagnostics: what the 1s combat tick saw while a segment was open, and how
 -- long the group stayed out of combat between two segments.
 local last_combat_end = nil
-local tick_stats = {ticks = 0, lockdown = 0, group = 0, pets = 0, pets_only = 0, stale = 0}
+local tick_stats = {ticks = 0, lockdown = 0, group = 0, pets = 0, pets_only = 0, stale = 0, pet_friendly = 0}
+
+-- diagnostics: the last pet event that refreshed pet_activity, so a segment
+-- held open by pets alone says which pet, on whom and with what.
+local pet_holder = {}
+local pets_holding = nil -- true while the current run of pets-only ticks lasts
+
+local function pet_holder_str()
+	if not pet_holder.event then return "none" end
+	return format("%s %s > %s (%s) %.1f s ago", tostring(pet_holder.event), tostring(pet_holder.src),
+		tostring(pet_holder.dst), tostring(pet_holder.spell), GetTime() - (pet_holder.at or 0))
+end
 
 -- diagnostics: combat log events thrown away because the segment was stopped,
 -- and how long it stayed that way. smart stop freezes a segment seconds after a
@@ -164,19 +204,67 @@ local function boss_split_time()
 	return max(5, P.bosssplittime or BOSS_SPLIT_TIME)
 end
 
+-- the 3.3.5 client can stop handing the combat log to addons altogether until
+-- its entries are cleared or the UI is reloaded. one RS 25 run (2026-10-11)
+-- saved Baltharus and Saviana as kills with no actor, no damage and no healing
+-- at all: 91 and 105 s in combat without a single event. Skada._cleu counts
+-- every event ParseCombatLog is handed, so us in combat with that counter
+-- standing still means the log is dead, and clearing it is what brings it back.
+-- this runs whether or not the Tweaks combat log fix is on.
+local CLEU_QUIET_TIMEOUT = 5
+ns.CLEU_QUIET_TIMEOUT = CLEU_QUIET_TIMEOUT
+local cleu_seen, cleu_quiet_since = nil, nil
+local cleu_kicks, cleu_kicked = 0, nil -- kicks this segment, and one still unanswered
+
+local function check_combat_log(lockdown)
+	local seen = Skada._cleu
+	if seen ~= cleu_seen then
+		if cleu_kicked then
+			cleu_kicked = nil
+			Skada:Debug("\124cffffbb00CombatLog\124r: Back")
+			Skada:LogDebug("combat", "the combat log is back after %d kick(s)", cleu_kicks)
+		end
+		cleu_seen, cleu_quiet_since = seen, nil
+		return
+	elseif not lockdown then
+		cleu_quiet_since = nil
+		return
+	end
+
+	local now = GetTime()
+	cleu_quiet_since = cleu_quiet_since or now
+	if now - cleu_quiet_since < CLEU_QUIET_TIMEOUT then return end
+
+	cleu_quiet_since = now -- one kick per timeout, for as long as it stays dead
+	cleu_kicks, cleu_kicked = cleu_kicks + 1, true
+	CombatLogClearEntries()
+	Skada:Debug("\124cffffbb00CombatLog\124r: Cleared")
+	Skada:LogDebug("combat", "no combat log event for %d s while in combat, cleared its entries (kick %d)",
+		CLEU_QUIET_TIMEOUT, cleu_kicks)
+end
+
 local out_of_combat_since = nil
 
 local function reset_tick_stats()
 	tick_stats.ticks, tick_stats.lockdown, tick_stats.stale = 0, 0, 0
 	tick_stats.group, tick_stats.pets, tick_stats.pets_only = 0, 0, 0
+	tick_stats.pet_friendly = 0
+	pet_holder.event, pet_holder.src, pet_holder.dst, pet_holder.spell, pet_holder.at = nil, nil, nil, nil, nil
+	pets_holding = nil
 	dropped_events, dropped_time, stopped_since = 0, 0, nil
+	cleu_kicks, cleu_quiet_since = 0, nil
 	out_of_combat_since, autostop_deadline = nil, nil
 end
 
-local function log_segment_gap(how)
+-- t: the combat log event that opened the segment, if one did.
+local function log_segment_gap(how, t)
 	if not Skada.debuglog_on then return end
 	Skada:LogDebug("segment", "new segment via %s, %s s since the previous one ended", how,
 		last_combat_end and format("%.1f", GetTime() - last_combat_end) or "?")
+	if t then
+		Skada:LogDebug("segment", "  opened by %s %s > %s (%s) amount=%s", tostring(t.event), tostring(t.srcName),
+			tostring(t.dstName), tostring(t.spellname or t.spellid), tostring(t.amount))
+	end
 end
 
 -- list of feeds & selected feed
@@ -402,6 +490,28 @@ local function is_real_attempt(set)
 	return true
 end
 
+-- a window remembers a saved segment by its index in Skada.sets, and so does
+-- the view it returns to after combat. both have to move whenever the array
+-- shifts under them, and at that very moment: clean_sets trims right after an
+-- insert and counts on the indices already being current. every window moves
+-- on its own, so a child window is never moved twice through its parent.
+local function shift_window_sets(index, delta)
+	for i = 1, #windows do
+		local win = windows[i]
+		if win then
+			local selected = tonumber(win.selectedset)
+			if selected and selected >= index then
+				win.selectedset = selected + delta
+				win.changed = true
+			end
+			local restore = tonumber(win.restore_set)
+			if restore and restore >= index then
+				win.restore_set = restore + delta
+			end
+		end
+	end
+end
+
 -- process the given set and stores into sv.
 -- returns the set if it survived, nil if it was recycled.
 local tinsert = table.insert
@@ -452,9 +562,9 @@ local function process_set(set, curtime, mobname)
 				-- pulls cannot fill the whole segment budget on its own. they are
 				-- only unpinned, so clean_sets trims them in its own time.
 				--
-				-- keepwipes turns that off for the user who wants every attempt
-				-- of a progress night to stay, kill or no kill.
-				if set.success and not P.keepwipes then
+				-- turning dropwipes off keeps every attempt of a progress
+				-- night instead, kill or no kill.
+				if set.success and P.dropwipes then
 					release_failed_attempts(set.gotboss, set.mobname)
 				end
 			end
@@ -470,6 +580,7 @@ local function process_set(set, curtime, mobname)
 			callbacks:Fire("Skada_SetComplete", set, curtime)
 
 			tinsert(Skada.sets, 1, set)
+			shift_window_sets(1, 1)
 			Skada:Debug(format("Segment Saved: \124cffffbb00%s\124r", set.name))
 		else
 			return delete_set(set)
@@ -483,6 +594,37 @@ local function process_set(set, curtime, mobname)
 	end
 
 	return set
+end
+
+-- a segment at the given index was just removed from Skada.sets, so every
+-- window pinned by number has to follow: the one that was watching it has
+-- nothing left to show, and the ones below it shifted down by a slot.
+-- Skada:DeleteSet does the same for a segment the user deletes by hand.
+local function drop_window_set(index)
+	for i = 1, #windows do
+		local win = windows[i]
+		if win then
+			if tonumber(win.selectedset) == index then
+				win.selectedset = "current"
+				win.changed = true
+			end
+			if tonumber(win.restore_set) == index then
+				win.restore_set = "current"
+			end
+		end
+	end
+	shift_window_sets(index + 1, -1)
+end
+
+-- recycles a trimmed segment. Skada.last may still point at it: combat_end
+-- sets it just before trimming, and with setstokeep at 0 the segment it just
+-- saved goes straight away. a late DBM callback falls back on Skada.last and
+-- would then write into a table that is back in the pool.
+local function forget_last(set)
+	if set and set == Skada.last then
+		Skada.last = nil
+	end
+	delete_set(set)
 end
 
 local function clean_sets(force)
@@ -503,7 +645,8 @@ local function clean_sets(force)
 	-- we trim segments without touching persistent ones.
 	for i = #sets, 1, -1 do
 		if (force or numsets > P.setstokeep) and not sets[i].keep then
-			delete_set(tremove(sets, i))
+			forget_last(tremove(sets, i))
+			drop_window_set(i)
 			numsets = numsets - 1
 			maxsets = maxsets - 1
 		end
@@ -513,7 +656,8 @@ local function clean_sets(force)
 	-- the amount of segments kept can grow big, so we make sure to keep
 	-- the player reasonable, otherwise they'll encounter memory issues.
 	while maxsets > Skada.maxsets and sets[maxsets] do
-		delete_set(tremove(Skada.sets, maxsets))
+		forget_last(tremove(Skada.sets, maxsets))
+		drop_window_set(maxsets)
 		maxsets = maxsets - 1
 	end
 end
@@ -538,15 +682,56 @@ local function summon_pet(petGUID, ownerGUID)
 	ownerGUID = guidToClass[guidOrClass] and guidOrClass or ownerGUID
 	guidToOwner[petGUID] = ownerGUID
 
-	Skada:LogDebug("pet", "summoned %s owner=%s (%s)", tostring(petGUID),
-		tostring(ownerGUID), tostring(guidToName[ownerGUID]))
+	if Skada.debuglog_on then
+		Skada:LogDebug("pet", "summoned %s owner=%s (%s)", tostring(petGUID),
+			tostring(ownerGUID), tostring(guidToName[ownerGUID]))
+	end
 
 	-- "totem > elemental" can arrive before "shaman > totem", leaving the
-	-- elemental owned by the totem. re-point whatever this pet owns.
+	-- elemental owned by the totem. re-point whatever this pet owns. the key
+	-- already exists, so guidToOwner's __newindex won't mirror it: guidToClass,
+	-- which FixPets reads, is written by hand.
 	for guid, owner in next, guidToOwner do
 		if owner == petGUID then
 			guidToOwner[guid] = ownerGUID
+			guidToClass[guid] = ownerGUID
 		end
+	end
+end
+
+-- a hunter's snake trap is the one guardian the combat log hands to nobody:
+-- the hunter creates the trap (SPELL_CREATE 34600) and the snakes are summoned
+-- later by a "World Invisible Trigger" (SPELL_SUMMON 57879), so every snake got
+-- a row of its own, 64 of them over one raid evening (2026-10-11). the trap and
+-- the trigger share no guid, so the snakes go to whoever in the group placed a
+-- snake trap last. the kept ICC log has the summon 1 to 20 s after the trap;
+-- the window is that with room to spare.
+local snake_trap_placed, snake_trap_owner
+do
+	local SNAKE_TRAP, SNAKE_TRAP_EFFECT = 34600, 57879
+	local SNAKE_TRAP_WINDOW = 60
+	local snake_traps = {} -- [hunter guid] = when the trap went down
+
+	function snake_trap_placed(t)
+		if t.spellid == SNAKE_TRAP and t.event == "SPELL_CREATE" and guidToName[t.srcGUID] then
+			snake_traps[t.srcGUID] = GetTime()
+		end
+	end
+
+	-- the hunter to hand this summon to, if it is a snake trap going off
+	function snake_trap_owner(t)
+		if t.spellid ~= SNAKE_TRAP_EFFECT then return end
+
+		local oldest = GetTime() - SNAKE_TRAP_WINDOW
+		local owner, latest = nil, nil
+		for guid, at in next, snake_traps do
+			if at < oldest then
+				snake_traps[guid] = nil
+			elseif guidToName[guid] and (not latest or at > latest) then
+				owner, latest = guid, at
+			end
+		end
+		return owner
 	end
 end
 
@@ -554,7 +739,9 @@ local dismiss_pet
 do
 	local dismiss_timers = nil
 	local function dismiss_handler(guid)
-		Skada:LogDebug("pet", "dismissed %s (was owned by %s)", tostring(guid), tostring(guidToOwner[guid]))
+		if Skada.debuglog_on then
+			Skada:LogDebug("pet", "dismissed %s (was owned by %s)", tostring(guid), tostring(guidToOwner[guid]))
+		end
 		guidToOwner[guid] = nil
 		guidToClass[guid] = nil
 
@@ -1693,12 +1880,12 @@ do
 		end
 	end
 
-	local uformat = Private.uformat
-	local function add_click_lines(mode, label, win, t, fmt)
+	local AddKeyLine = Private.AddKeyLine
+	local function add_click_lines(mode, label, win, t, key)
 		if type(mode) == "function" then
-			t:AddLine(uformat(fmt, label))
+			AddKeyLine(t, key, label or L["Unknown"])
 		elseif not total_noclick(win.selectedset, mode) then
-			t:AddLine(format(fmt, label or mode.localeName))
+			AddKeyLine(t, key, label or mode.localeName)
 		end
 	end
 
@@ -1782,16 +1969,16 @@ do
 		end
 
 		if md.click1 then
-			add_click_lines(md.click1, md.click1_label, win, t, L["Click for \124cff00ff00%s\124r"])
+			add_click_lines(md.click1, md.click1_label, win, t, L["Left-Click"])
 		end
 		if md.click2 then
-			add_click_lines(md.click2, md.click2_label, win, t, L["Shift-Click for \124cff00ff00%s\124r"])
+			add_click_lines(md.click2, md.click2_label, win, t, L["Shift+Left-Click"])
 		end
 		if md.click3 then
-			add_click_lines(md.click3, md.click3_label, win, t, L["Control-Click for \124cff00ff00%s\124r"])
+			add_click_lines(md.click3, md.click3_label, win, t, L["Ctrl+Left-Click"])
 		end
 		if md.filterclass then
-			t:AddLine(format(L["Alt-Click for \124cff00ff00%s\124r"], L["Toggle Class Filter"]))
+			AddKeyLine(t, L["Alt+Left-Click"], L["Toggle Class Filter"])
 		end
 
 		t:Show()
@@ -2026,6 +2213,7 @@ end
 function Skada:PLAYER_LEAVING_WORLD()
 	if not self.inCombat then return end
 	P.inCombat = true
+	self:LogDebug("segment", "leaving the world (release, loading screen or reload) ends the segment")
 	combat_end()
 end
 
@@ -2231,6 +2419,20 @@ do
 			local guid = unit and UnitGUID(unit)
 			if guid then
 				guidToOwner[guid] = UnitGUID(owner)
+			end
+		end
+	end
+
+	-- the roster skips names the client has not loaded yet, add them once known
+	local AddCombatant = Private.AddCombatant
+	function Skada:UNIT_NAME_UPDATE(units)
+		for unit in pairs(units) do
+			local guid = groupUnits[unit] and UnitGUID(unit)
+			if guid and not guidToName[guid] then
+				AddCombatant(unit)
+				if guidToName[guid] then
+					self:LogDebug("roster", "name loaded: unit=%s name=%s guid=%s", unit, guidToName[guid], guid)
+				end
 			end
 		end
 	end
@@ -2478,9 +2680,12 @@ function dataobj:OnEnter()
 	self.tooltip:SetPoint("TOPRIGHT", self, "BOTTOMRIGHT")
 	self.tooltip:ClearLines()
 
+	-- the emblem and name with the version beside it, the current fight's
+	-- summary when there is one, then what each click does.
+	self.tooltip:AddDoubleLine(format("\124T%s:16:16\124t %s", Skada.logo, folder), "v" .. Skada.version, 1, 1, 1, 0.73, 0.70, 0.77)
+
 	local set = Skada:GetSet("current")
 	if set then
-		self.tooltip:AddDoubleLine(L["Skada Summary"], Skada.version)
 		self.tooltip:AddLine(" ")
 		self.tooltip:AddDoubleLine(L["Segment Time"], formatted_set_time(set), 1, 1, 1)
 		for i = 1, #modes do
@@ -2489,15 +2694,13 @@ function dataobj:OnEnter()
 				mode:AddToTooltip(set, self.tooltip)
 			end
 		end
-		self.tooltip:AddLine(" ")
-	else
-		self.tooltip:AddDoubleLine(folder, Skada.version, nil, nil, nil, 0, 1, 0)
 	end
 
-	self.tooltip:AddLine(L["\124cff00ff00Left-Click\124r to toggle windows."], 1, 1, 1)
-	self.tooltip:AddLine(L["\124cff00ff00Ctrl+Left-Click\124r to show/hide windows."], 1, 1, 1)
-	self.tooltip:AddLine(L["\124cff00ff00Shift+Left-Click\124r to reset."], 1, 1, 1)
-	self.tooltip:AddLine(L["\124cff00ff00Right-Click\124r to open menu."], 1, 1, 1)
+	self.tooltip:AddLine(" ")
+	Private.AddKeyLine(self.tooltip, L["Left-Click"], L["Toggle Windows"])
+	Private.AddKeyLine(self.tooltip, L["Ctrl+Left-Click"], L["Show/Hide Windows"])
+	Private.AddKeyLine(self.tooltip, L["Shift+Left-Click"], L["Reset"])
+	Private.AddKeyLine(self.tooltip, L["Right-Click"], L["Open Menu"])
 
 	self.tooltip:Show()
 end
@@ -2651,6 +2854,16 @@ end
 function Skada:OnInitialize()
 	self.data = LibStub("AceDB-3.0"):New("SkadaDB", self.defaults, true)
 
+	-- registered before the first read of data.profile: AceDB builds the
+	-- profile lazily and fires OnNewProfile from that very access, so a later
+	-- registration would miss a fresh install entirely.
+	self.data.RegisterCallback(self, "OnNewProfile", "MarkProfileCurrent")
+	-- a reset profile is back on the defaults as well. its own key: a second
+	-- registration under self would replace ReloadSettings, registered below.
+	self.data.RegisterCallback("SkadaRecommended", "OnProfileReset", function(event, db)
+		Skada:MarkProfileCurrent(event, db)
+	end)
+
 	if type(SkadaCharDB) ~= "table" then
 		SkadaCharDB = {}
 	end
@@ -2727,6 +2940,7 @@ function Skada:OnEnable()
 	self:RegisterEvent("PLAYER_REGEN_DISABLED")
 	self:RegisterEvent("ZONE_CHANGED_NEW_AREA", "CheckZone")
 	self:RegisterBucketEvent("UNIT_PET", 0.2)
+	self:RegisterBucketEvent("UNIT_NAME_UPDATE", 0.2)
 	self:RegisterBucketEvent("UNIT_ENTERED_VEHICLE", 0.1, "CheckVehicle")
 	self:RegisterBucketEvent("UNIT_EXITED_VEHICLE", 0.1, "CheckVehicle")
 	self:RegisterBucketEvent("PARTY_MEMBERS_CHANGED", 0.2, "UpdateRoster")
@@ -2758,6 +2972,10 @@ function Skada:OnEnable()
 	Private.SetupDebugLog()
 	self.__memory_timer = self:ScheduleTimer("CheckMemory", 3)
 	self.__garbage_timer = self:ScheduleTimer("CleanGarbage", 4)
+
+	-- delayed: a popup fired straight from OnEnable lands before the UI is
+	-- ready for it and other addons are still loading their own dialogs.
+	self:ScheduleTimer("OfferRecommendedSettings", 5)
 end
 
 -- called on boss defeat
@@ -2858,6 +3076,7 @@ function Skada:PLAYER_REGEN_ENABLED()
 	-- 	2. the player and the group aren't in combat
 	if self.current.stopped or (not InCombatLockdown() and not IsGroupInCombat() and not pets_in_combat()) then
 		self:Debug("\124cffffbb00EndSegment\124r: PLAYER_REGEN_ENABLED")
+		self:LogDebug("segment", "PLAYER_REGEN_ENABLED ends the segment (stopped=%s)", tostring(self.current.stopped))
 		combat_end()
 	end
 end
@@ -2879,6 +3098,7 @@ end
 
 function Skada:NewSegment()
 	if self.current then
+		self:LogDebug("segment", "a new segment was asked for, ending the current one")
 		combat_end()
 		combat_start()
 	end
@@ -2917,6 +3137,17 @@ local function is_undying_boss(set)
 	return false
 end
 
+-- such a fight leaves its adds standing: the gunship's crew is still aboard
+-- after the kill, and a straggler shot then opened a second boss segment that
+-- the never-dies rule promptly counted as another win (ICC, 2026-10-02).
+local function won_just_now(name)
+	local last = Skada.last
+	if not last or not last.success or last.mobname ~= name or not last.endtime then
+		return false
+	end
+	return (time() - last.endtime) < 60 and is_undying_boss(last)
+end
+
 -- curtime lets the caller date the end to when combat actually stopped, which
 -- is earlier than now whenever we waited out a grace period.
 function combat_end(curtime)
@@ -2928,8 +3159,11 @@ function combat_end(curtime)
 	-- walking out of the fight with the group still standing is the kill: an
 	-- actual wipe leaves everyone dead and is caught here first. autostop is not
 	-- involved, so this holds whether or not the user enabled it.
+	-- the group has to be out of combat as well: a raider who dies and releases
+	-- ends the segment while the rest still fight on, and two Thorim wipes were
+	-- saved as kills that way (Ulduar, 2026-10-07).
 	if not Skada.current.success and Skada.current.gotboss and not IsGroupDead()
-		and is_undying_boss(Skada.current) then
+		and not IsGroupInCombat() and is_undying_boss(Skada.current) then
 		Skada.current.success = true
 		if Skada.debuglog_on then Skada.current.success_src = "never-dies" end
 		Skada:LogDebug("boss", "%s does not die as a unit and the group is still up, counting it as a kill",
@@ -2957,12 +3191,18 @@ function combat_end(curtime)
 			Skada:LogDebug("segment", "  unresolved pending kills: %s", pending_kills_str())
 		end
 		Skada:LogDebug("segment", "  actors: %s", table.concat(names, ", "))
-		Skada:LogDebug("segment", "  ticks=%d of which lockdown=%d groupInCombat=%d petsInCombat=%d petsAlone=%d staleCombat=%d",
+		Skada:LogDebug("segment", "  ticks=%d of which lockdown=%d groupInCombat=%d petsInCombat=%d petsAlone=%d staleCombat=%d petFriendly=%d",
 			tick_stats.ticks, tick_stats.lockdown, tick_stats.group, tick_stats.pets,
-			tick_stats.pets_only, tick_stats.stale)
+			tick_stats.pets_only, tick_stats.stale, tick_stats.pet_friendly)
+		if tick_stats.pets_only > 0 then
+			Skada:LogDebug("segment", "  last pet event that held it: %s", pet_holder_str())
+		end
 		if dropped_events > 0 or stopped_since then
 			Skada:LogDebug("segment", "  dropped %d combat log events over %.1f s while the segment was stopped",
 				dropped_events, stopped_seconds())
+		end
+		if cleu_kicks > 0 then
+			Skada:LogDebug("segment", "  the combat log went silent in combat and was cleared %d time(s)", cleu_kicks)
 		end
 	end
 
@@ -3003,9 +3243,13 @@ function combat_end(curtime)
 	local last_set = process_set(Skada.current, curtime)
 
 	if Skada.debuglog_on then
-		if last_set then
+		-- onlykeepbosses hands a trash segment back without storing it,
+		-- so only the head of Skada.sets was really saved.
+		if last_set and Skada.sets[1] == last_set then
 			Skada:LogDebug("segment", "  saved as \"%s\" time=%s keep=%s", tostring(last_set.name),
 				tostring(last_set.time), tostring(last_set.keep))
+		elseif last_set then
+			Skada:LogDebug("segment", "  not kept: %s", drop_reason or "unknown")
 		else
 			Skada:LogDebug("segment", "  discarded: %s", drop_reason or "unknown")
 		end
@@ -3075,6 +3319,7 @@ function combat_end(curtime)
 	pet_activity = nil
 	last_combat_end = Skada._Time
 	pending_kills, pending_any = del(pending_kills), false
+	roster_dead = del(roster_dead)
 end
 
 -- auto is set by the callers that stop a segment on their own (smart stop after
@@ -3174,13 +3419,13 @@ function Skada:SetModes()
 	if self.modes_set then return end
 	self.modes_set = true
 
+	-- windows pinned to a saved segment were already moved along when it was
+	-- inserted (see shift_window_sets). moving them here as well used to go
+	-- wrong both ways: smart stop lands here before anything is inserted, and
+	-- the modes_set gate then skipped the call that came after the insert.
 	for i = 1, #windows do
 		local win = windows[i]
 		if win then
-			if win.selectedset ~= "current" and win.selectedset ~= "total" then
-				win:SetSelectedSet(nil, 1) -- move to next set
-			end
-
 			win:Wipe()
 			Skada.changed = true
 
@@ -3287,6 +3532,8 @@ do
 		if group then tick_stats.group = tick_stats.group + 1 end
 		if pets then tick_stats.pets = tick_stats.pets + 1 end
 
+		check_combat_log(lockdown)
+
 		-- pvp and arena segments are ended by their own events
 		if Skada.insType == "pvp" or Skada.insType == "arena" then return end
 
@@ -3318,6 +3565,12 @@ do
 			-- the pet grace alone is holding this segment open
 			if pets and not lockdown and not group then
 				tick_stats.pets_only = tick_stats.pets_only + 1
+				if not pets_holding and Skada.debuglog_on then
+					Skada:LogDebug("segment", "only pets hold the segment now, last pet event: %s", pet_holder_str())
+				end
+				pets_holding = true
+			else
+				pets_holding = nil
 			end
 			if not lockdown and group and Skada.debuglog_on then
 				Private.LogDebugCombatHolders(tick_stats.ticks)
@@ -3354,6 +3607,7 @@ do
 
 		if update_timer then
 			Skada:Debug("\124cffffbb00EndSegment\124r: StartCombat")
+			Skada:LogDebug("segment", "combat started with a segment still running, ending it")
 			combat_end()
 		end
 
@@ -3481,6 +3735,7 @@ do
 	local GetInstanceInfo = GetInstanceInfo
 	local GetBattlefieldArenaFaction = GetBattlefieldArenaFaction
 	local BITMASK_CONTROL_PLAYER = COMBATLOG_OBJECT_CONTROL_PLAYER or 0x00000100
+	local BITMASK_FOE = (COMBATLOG_OBJECT_REACTION_HOSTILE or 0x00000040) + (COMBATLOG_OBJECT_REACTION_NEUTRAL or 0x00000020)
 
 	local function check_boss_fight(set, t, src_is_interesting, dst_is_interesting)
 		-- set mobname
@@ -3493,14 +3748,19 @@ do
 				if set.type == "arena" then
 					Skada:SendMessage("COMBAT_ARENA_START", set, set.mobname)
 				end
-			elseif src_is_interesting and not t:DestIsFriendly() then
+			-- only a hit names the segment. players outside the raid log as
+			-- neutral, and their buffs falling off raiders used to name a boss
+			-- pull after one of them and mark it pvp, which switched the boss
+			-- check off for the whole fight (Ruby Sanctum, 2026-09-28:
+			-- Baltharus and Saviana lost as trash).
+			elseif trigger_events[t.event] and src_is_interesting and not t:DestIsFriendly() then
 				set.mobname = t.dstName
 				if bit_band(t.dstFlags or 0, BITMASK_CONTROL_PLAYER) ~= 0 then
 					set.type = "pvp"
 					set.gotboss = false
 					Skada:SendMessage("COMBAT_PVP_START", "pvp", Skada.insType)
 				end
-			elseif dst_is_interesting and not t:SourceIsFriendly() then
+			elseif trigger_events[t.event] and dst_is_interesting and not t:SourceIsFriendly() then
 				set.mobname = t.srcName
 				if bit_band(t.srcFlags or 0, BITMASK_CONTROL_PLAYER) ~= 0 then
 					set.type = "pvp"
@@ -3567,7 +3827,7 @@ do
 						Skada:LogDebug("boss", "%s died (%s), fight over=%s", tostring(t.dstName), tostring(id), tostring(defeated))
 					end
 				else
-					defeated = (set.gotboss == id)
+					defeated = (set.gotboss == id) or roster_defeated(set, id, t.dstGUID)
 				end
 
 				if defeated then
@@ -3587,6 +3847,11 @@ do
 		if trigger_events[t.event] and src_is_interesting and not t:DestIsFriendly() then
 			if not _targets or not _targets[t.dstName] then
 				local isboss, bossid, bossname = Skada:IsEncounter(t.dstGUID, t.dstName)
+				if isboss and won_just_now(bossname or t.dstName) then
+					Skada:LogDebug("boss", "%s was won %d s ago, %s is a straggler",
+						tostring(bossname), time() - Skada.last.endtime, tostring(t.dstName))
+					isboss = false
+				end
 				if isboss then -- found?
 					-- gotboss == false means this segment already ruled a target
 					-- out, so it started on something that is not this fight.
@@ -3609,7 +3874,7 @@ do
 					Skada:SendMessage("COMBAT_ENCOUNTER_START", set)
 					Skada:PrintFirstHit()
 					_targets = del(_targets)
-					Skada:Debug(format("\124cffffbb00Boss Check\124r: %s (%s) - match, gotboss=%s", t.dstName or "?", GetCreatureId(t.dstGUID) or 0, tostring(set.gotboss)))
+					if P.debug then Skada:Debug(format("\124cffffbb00Boss Check\124r: %s (%s) - match, gotboss=%s", t.dstName or "?", GetCreatureId(t.dstGUID) or 0, tostring(set.gotboss))) end
 					if Skada.debuglog_on then
 						-- how far into the segment the pull happened: everything
 						-- before it is trash the boss segment ends up counting,
@@ -3623,7 +3888,7 @@ do
 					_targets = _targets or new()
 					_targets[t.dstName] = true
 					set.gotboss = false
-					Skada:Debug(format("\124cffffbb00Boss Check\124r: %s (%s) - no match", t.dstName or "?", GetCreatureId(t.dstGUID) or 0))
+					if P.debug then Skada:Debug(format("\124cffffbb00Boss Check\124r: %s (%s) - no match", t.dstName or "?", GetCreatureId(t.dstGUID) or 0)) end
 					if Skada.debuglog_on then
 						local id = GetCreatureId(t.dstGUID)
 						Skada:LogDebug("boss", "no match for %s (%s)%s", tostring(t.dstName), tostring(id),
@@ -3674,6 +3939,9 @@ do
 	local dst_is_interesting = false
 
 	function Skada:OnCombatEvent(t)
+		-- SPELL_CREATE is ignored below, and a trap goes down before the pull
+		snake_trap_placed(t)
+
 		-- ignored combat event?
 		if (not t.event or ignored_events[t.event]) and not (spellcast_events[t.event] and self.current) then return end
 
@@ -3693,7 +3961,7 @@ do
 
 			if src_is_interesting or dst_is_interesting then
 				self.current = create_set(L["Current"], tentative_set)
-				log_segment_gap("combat log")
+				log_segment_gap("combat log", t)
 				reset_tick_stats()
 				self.total = self.total or create_set(L["Total"])
 
@@ -3713,6 +3981,11 @@ do
 		-- shaman's chain is player > totem > elemental.
 		if t.event == "SPELL_SUMMON" and (t:SourceInGroup() or guidToOwner[t.srcGUID]) and t:DestIsPet() then
 			summon_pet(t.dstGUID, t.srcGUID)
+		elseif t.event == "SPELL_SUMMON" and t:DestIsPet() then
+			local hunter = snake_trap_owner(t)
+			if hunter then
+				summon_pet(t.dstGUID, hunter)
+			end
 		-- pet died?
 		elseif death_events[t.event] and guidToOwner[t.dstGUID] then
 			dismiss_pet(t.dstGUID, 1)
@@ -3741,9 +4014,24 @@ do
 		self._Time = GetTime()
 
 		-- only pet/guardian activity may keep the segment alive, see
-		-- pets_in_combat above.
-		if guidToOwner[t.srcGUID] or guidToOwner[t.dstGUID] then
+		-- pets_in_combat above. a pet acting on itself is not a fight: hunter
+		-- pet buffs (Bloodthirsty heals and energizes once a second, Frenzy,
+		-- Rabid Power) keep ticking long after the target is dead, and used to
+		-- pad every solo trash segment with the whole duration of those auras.
+		-- a real fight always has a second party, and that party is a foe:
+		-- totems and pets heal and buff the raid for a minute or more after a
+		-- kill, and used to keep a near empty segment open behind every boss
+		-- (ICC, 2026-09-25: 50 to 76 s each, held by pets alone). so the other side
+		-- must be hostile or neutral, which also rules out the pet itself.
+		if (guidToOwner[t.srcGUID] and bit_band(t.dstFlags or 0, BITMASK_FOE) ~= 0)
+		or (guidToOwner[t.dstGUID] and bit_band(t.srcFlags or 0, BITMASK_FOE) ~= 0) then
 			pet_activity = self._Time
+			if self.debuglog_on then
+				pet_holder.event, pet_holder.src, pet_holder.dst = t.event, t.srcName, t.dstName
+				pet_holder.spell, pet_holder.at = t.spellname or t.spellid, self._Time
+			end
+		elseif guidToOwner[t.srcGUID] or guidToOwner[t.dstGUID] then
+			tick_stats.pet_friendly = tick_stats.pet_friendly + 1 -- diagnostics only
 		end
 
 		check_cached_names(t)
@@ -3798,7 +4086,7 @@ do
 					else
 						tentative = tentative + 1
 					end
-					self:Debug(format("\124cffffbb00Tentative\124r: %s (%d)", t.event, tentative))
+					if P.debug then self:Debug(format("\124cffffbb00Tentative\124r: %s (%d)", t.event, tentative)) end
 					if tentative >= 5 then
 						self:CancelTimer(tentative_timer, true)
 						tentative_timer = nil

@@ -725,6 +725,12 @@ Skada:RegisterModule("Debuffs", function(_, _, _, C)
 		aura.type = t.auratype
 		Skada:FixPets(aura)
 
+		-- a pet nobody owns yet debuffing itself. Putricide's abomination casts
+		-- Mutation on itself the instant it appears, before the vehicle event
+		-- names its driver, and that one aura left it a row of its own.
+		-- FixPets marks an unresolved pet by keying it on its name.
+		if t.srcGUID == t.dstGUID and aura.actorid == aura.actorname then return end
+
 		if t.event == "SPELL_AURA_APPLIED" then
 			Skada:DispatchSets(log_auraapplied)
 		elseif t.event == "SPELL_AURA_REMOVED" then
